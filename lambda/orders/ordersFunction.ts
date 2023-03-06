@@ -39,7 +39,7 @@ export async function handler(
   );
 
   if (method === 'GET') {
-    if (!event.queryStringParameters) {
+    if (event.queryStringParameters) {
       const email = event.queryStringParameters!.email;
       const orderId = event.queryStringParameters!.orderId;
       if (email) {
