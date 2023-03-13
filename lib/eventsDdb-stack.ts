@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import { Construct } from 'constructs';
 
 export class EventsDdbStack extends cdk.Stack {
   readonly table: dynamodb.Table;
@@ -23,6 +23,25 @@ export class EventsDdbStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PROVISIONED,
       readCapacity: 1,
       writeCapacity: 1,
+    });
+    const readScale = this.table.autoScaleReadCapacity({
+      maxCapacity: 2,
+      minCapacity: 1,
+    });
+    readScale.scaleOnUtilization({
+      targetUtilizationPercent: 50,
+      scaleInCooldown: cdk.Duration.seconds(60),
+      scaleOutCooldown: cdk.Duration.seconds(60),
+    });
+
+    const writeScale = this.table.autoScaleWriteCapacity({
+      maxCapacity: 4,
+      minCapacity: 1,
+    });
+    writeScale.scaleOnUtilization({
+      targetUtilizationPercent: 30,
+      scaleInCooldown: cdk.Duration.seconds(60),
+      scaleOutCooldown: cdk.Duration.seconds(60),
     });
   }
 }
