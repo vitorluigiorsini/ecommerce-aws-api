@@ -114,11 +114,16 @@ async function processRecord(record: S3EventRecord) {
         InvoiceTransactionStatus.PROCESSED
       );
 
+      const disconnectClient = invoiceWSService.disconnectClient(
+        invoiceTransaction.connectionId
+      );
+
       await Promise.all([
         createInvoicePromise,
         deleteObjectPromise,
         updateInvoicePromise,
         sendStatusPromise,
+        disconnectClient,
       ]);
     } else {
       console.error('Non valid invoice number');
