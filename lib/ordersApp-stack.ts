@@ -9,6 +9,9 @@ import * as iam from 'aws-cdk-lib/aws-iam'
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import * as lambdaEventSource from 'aws-cdk-lib/aws-lambda-event-sources'
 import * as event from 'aws-cdk-lib/aws-events'
+import * as logs from 'aws-cdk-lib/aws-logs'
+import * as cw from 'aws-cdk-lib/aws-cloudwatch'
+import * as cw_actions from 'aws-cdk-lib/aws-cloudwatch-actions'
 import { Construct } from 'constructs'
 
 interface OrdersAppStackProps extends cdk.StackProps {
@@ -37,6 +40,21 @@ export class OrdersAppStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PROVISIONED,
       readCapacity: 1,
       writeCapacity: 1
+    })
+
+    const writeThrottleEventsMetric = ordersDdb.metric('WriteThrottleEvents', {
+      period: cdk.Duration.minutes(2),
+      statistic: 'SampleCount',
+      unit: cw.Unit.COUNT
+    })
+    writeThrottleEventsMetric.createAlarm(this, 'WriteThrottleEventsAlarm', {
+      alarmName: 'WriteThrottleEventsAlarm',
+      actionsEnabled: false,
+      evaluationPeriods: 1,
+      threshold: 10,
+      comparisonOperator:
+        cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cw.TreatMissingData.NOT_BREACHING
     })
 
     //Orders Layer
@@ -129,6 +147,44 @@ export class OrdersAppStack extends cdk.Stack {
     props.productsDdb.grantReadData(this.ordersHandler)
     ordersTopic.grantPublish(this.ordersHandler)
     props.auditBus.grantPutEventsTo(this.ordersHandler)
+
+    //Metric
+    const productNotFoundMetricFilter =
+      this.ordersHandler.logGroup.addMetricFilter('ProductNotFoundMetric', {
+        metricName: 'OrderWithNonValidProduct',
+        metricNamespace: 'ProductNotFound',
+        filterPattern: logs.FilterPattern.literal('Some product was not found')
+      })
+
+    //Alarm
+    const productNotFoundAlarm = productNotFoundMetricFilter
+      .metric()
+      .with({
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(2)
+      })
+      .createAlarm(this, 'ProductNotFoundAlarme', {
+        alarmName: 'OrderWithNonValidProduct',
+        alarmDescription:
+          'Some product was not found while creating a new order',
+        evaluationPeriods: 1,
+        threshold: 2,
+        actionsEnabled: true,
+        comparisonOperator:
+          cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD
+      })
+
+    //Action
+    const orderAlarmsTopic = new sns.Topic(this, 'OrderAlarmsTopic', {
+      displayName: 'Order alarms topic',
+      topicName: 'order-alarms'
+    })
+    orderAlarmsTopic.addSubscription(
+      new subs.EmailSubscription('vitorluigiorsini@gmail.com')
+    )
+    productNotFoundAlarm.addAlarmAction(
+      new cw_actions.SnsAction(orderAlarmsTopic)
+    )
 
     const orderEventsHandler = new lambdaNodeJS.NodejsFunction(
       this,
