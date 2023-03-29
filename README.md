@@ -1,8 +1,8 @@
-# E-Commerce serverless API with AWS-CDK + TypeScript
+## E-Commerce serverless API with AWS-CDK + TypeScript
 
 This project is a backend app to e-commerce, built as a serverless API with AWS-CDK + TypeScript.
 
-## Features accomplished in this project
+### Features accomplished in this project
 
 - [x] Creating the project with AWS CDK
 - [x] Creating the first lambda function
@@ -28,4 +28,4 @@ This project is a backend app to e-commerce, built as a serverless API with AWS-
 - [x] Generating import files events
 - [x] Generating audit events with EventBridge
 - [x] Setting Alarms with CloudWatch
-- [ ] Users authentication and authorization with AWS Cognito
+- [x] Users authentication and authorization with AWS Cognito

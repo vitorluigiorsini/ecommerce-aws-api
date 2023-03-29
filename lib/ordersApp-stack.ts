@@ -118,6 +118,17 @@ export class OrdersAppStack extends cdk.Stack {
       topicName: 'order-events'
     })
 
+    // Auth user info layer
+    const authUserInfoLayerArn = ssm.StringParameter.valueForStringParameter(
+      this,
+      'AuthUserInfoLayerVersionArn'
+    )
+    const authUserInfoLayer = lambda.LayerVersion.fromLayerVersionArn(
+      this,
+      'AuthUserInfoLayerVersionArn',
+      authUserInfoLayerArn
+    )
+
     this.ordersHandler = new lambdaNodeJS.NodejsFunction(
       this,
       'OrdersFunction',
@@ -137,9 +148,14 @@ export class OrdersAppStack extends cdk.Stack {
           ORDER_EVENTS_TOPIC_ARN: ordersTopic.topicArn,
           AUDIT_BUS_NAME: props.auditBus.eventBusName
         },
-        layers: [ordersLayer, productsLayer, ordersApiLayer, orderEventsLayer],
-        tracing: lambda.Tracing.ACTIVE,
-        insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_119_0
+        layers: [
+          ordersLayer,
+          productsLayer,
+          ordersApiLayer,
+          orderEventsLayer,
+          authUserInfoLayer
+        ],
+        tracing: lambda.Tracing.ACTIVE
       }
     )
 

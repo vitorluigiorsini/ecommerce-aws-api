@@ -1,4 +1,9 @@
-import { DynamoDB, EventBridge, SNS } from 'aws-sdk'
+import {
+  CognitoIdentityServiceProvider,
+  DynamoDB,
+  EventBridge,
+  SNS
+} from 'aws-sdk'
 import { Order, OrderRepository } from '/opt/nodejs/ordersLayer'
 import { Product, ProductRepository } from '/opt/nodejs/productsLayer'
 import * as AWSXRay from 'aws-xray-sdk'
@@ -21,6 +26,7 @@ import {
   Envelope
 } from '/opt/nodejs/orderEventsLayer'
 import { v4 as uuid } from 'uuid'
+import { AuthInfoService } from '/opt/nodejs/authUserInfo'
 
 AWSXRay.captureAWS(require('aws-sdk'))
 
@@ -32,9 +38,11 @@ const auditBusName = process.env.AUDIT_BUS_NAME!
 const ddbClient = new DynamoDB.DocumentClient()
 const snsClient = new SNS()
 const eventBridgeClient = new EventBridge()
+const cognitoIdentityServiceProvider = new CognitoIdentityServiceProvider()
 
 const orderRepository = new OrderRepository(ddbClient, ordersDdb)
 const productRepository = new ProductRepository(ddbClient, productsDdb)
+const authInfoService = new AuthInfoService(cognitoIdentityServiceProvider)
 
 export async function handler(
   event: APIGatewayProxyEvent,
@@ -48,49 +56,77 @@ export async function handler(
     `API Gateway RequestId: ${apiRequestId} - LambdaRequestId: ${lambdaRequestId}`
   )
 
+  const isAdminUser = authInfoService.isAdminUser(
+    event.requestContext.authorizer
+  )
+  const userEmail = await authInfoService.getUserInfo(
+    event.requestContext.authorizer
+  )
+
   if (method === 'GET') {
     if (event.queryStringParameters) {
       const email = event.queryStringParameters!.email
       const orderId = event.queryStringParameters!.orderId
-      if (email) {
-        if (orderId) {
-          // Get one order form an user
-          try {
-            const order = await orderRepository.getOrder(email, orderId)
+      if (isAdminUser || userEmail === email) {
+        if (email) {
+          if (orderId) {
+            // Get one order form an user
+            try {
+              const order = await orderRepository.getOrder(email, orderId)
+              return {
+                statusCode: 200,
+                body: JSON.stringify(convertToOrderResponse(order))
+              }
+            } catch (error) {
+              console.log((<Error>error).message)
+              return {
+                statusCode: 404,
+                body: (<Error>error).message
+              }
+            }
+          } else {
+            // Get all orders from an user
+            const orders = await orderRepository.getOrdersByEmail(email)
             return {
               statusCode: 200,
-              body: JSON.stringify(convertToOrderResponse(order))
-            }
-          } catch (error) {
-            console.log((<Error>error).message)
-            return {
-              statusCode: 404,
-              body: (<Error>error).message
+              body: JSON.stringify(orders.map(convertToOrderResponse))
             }
           }
         } else {
-          // Get all orders from an user
-          const orders = await orderRepository.getOrdersByEmail(email)
           return {
-            statusCode: 200,
-            body: JSON.stringify(orders.map(convertToOrderResponse))
+            statusCode: 403,
+            body: `You don't have permission to access this operation`
           }
         }
       }
     } else {
       // Get all orders
-      const orders = await orderRepository.getAllOrders()
-      return {
-        statusCode: 200,
-        body: JSON.stringify(orders.map(convertToOrderResponse))
+      if (isAdminUser) {
+        const orders = await orderRepository.getAllOrders()
+        return {
+          statusCode: 200,
+          body: JSON.stringify(orders.map(convertToOrderResponse))
+        }
+      } else {
+        return {
+          statusCode: 403,
+          body: `You don't have permission to access this operation`
+        }
       }
     }
   } else if (method === 'POST') {
-    console.log('POST /orders')
     const orderRequest = JSON.parse(event.body!) as OrderRequest
     const products = await productRepository.getProductsByIds(
       orderRequest.productIds
     )
+    if (!isAdminUser) {
+      orderRequest.email = userEmail
+    } else if (orderRequest.email === null) {
+      return {
+        statusCode: 400,
+        body: 'Missing the order owner email'
+      }
+    }
     if (products.length === orderRequest.productIds.length) {
       const order = buildOrder(orderRequest, products)
       const orderCreatedPromise = orderRepository.createOrder(order)
@@ -141,31 +177,36 @@ export async function handler(
       }
     }
   } else if (method === 'DELETE') {
-    console.log('DELETE /orders')
     const email = event.queryStringParameters!.email!
     const orderId = event.queryStringParameters!.orderId!
+    if (isAdminUser || userEmail === email) {
+      try {
+        const orderDeleted = await orderRepository.deleteOrder(email, orderId)
 
-    try {
-      const orderDeleted = await orderRepository.deleteOrder(email, orderId)
-
-      const eventResult = await sendOrderEvent(
-        orderDeleted,
-        OrderEventType.DELETED,
-        lambdaRequestId
-      )
-      console.log(
-        `Order deleted event sent - OrderId: ${orderDeleted.sk}
+        const eventResult = await sendOrderEvent(
+          orderDeleted,
+          OrderEventType.DELETED,
+          lambdaRequestId
+        )
+        console.log(
+          `Order deleted event sent - OrderId: ${orderDeleted.sk}
         - MessageId: ${eventResult.MessageId}`
-      )
-      return {
-        statusCode: 200,
-        body: JSON.stringify(convertToOrderResponse(orderDeleted))
+        )
+        return {
+          statusCode: 200,
+          body: JSON.stringify(convertToOrderResponse(orderDeleted))
+        }
+      } catch (error) {
+        console.log((<Error>error).message)
+        return {
+          statusCode: 404,
+          body: (<Error>error).message
+        }
       }
-    } catch (error) {
-      console.log((<Error>error).message)
+    } else {
       return {
-        statusCode: 404,
-        body: (<Error>error).message
+        statusCode: 403,
+        body: `You don't have permission to access this operation`
       }
     }
   }
