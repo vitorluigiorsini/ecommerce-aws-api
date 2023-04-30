@@ -1,3 +1,5 @@
+![Página ECommerce](https://i.ibb.co/HnN4sRy/ecommerce.png)
+
 ## E-Commerce serverless API with AWS-CDK + TypeScript
 
 This project is a backend app to e-commerce, built as a serverless API with AWS-CDK + TypeScript.
